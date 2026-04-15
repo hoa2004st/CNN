@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "engagement-pipeline"
+version = "0.1.0"
+description = "DAiSEE engagement reproduction scaffold (CNN + OpenFace + PCA/SVD + SMOTE)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "opencv-python>=4.9",
+  "scikit-learn>=1.5",
+  "imbalanced-learn>=0.12",
+  "PyYAML>=6.0",
+  "torch>=2.3",
+  "torchvision>=0.18",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

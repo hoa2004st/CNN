@@ -1,0 +1,528 @@
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Sequence
+
+from engagement_pipeline.cnn import CNNExtractionConfig, extract_cnn_features_for_records
+from engagement_pipeline.data_index import (
+    SPLIT_ORDER,
+    build_full_index,
+    read_records_jsonl,
+    write_json,
+    write_records_jsonl,
+)
+from engagement_pipeline.frame_sampling import save_sampled_frames_npy, sample_video_frames
+from engagement_pipeline.fusion import (
+    ALIGNMENT_MODES,
+    FUSION_METHODS,
+    FeatureFusionConfig,
+    fuse_features_for_records,
+)
+from engagement_pipeline.openface import (
+    DEFAULT_FEATURE_FLAGS,
+    OpenFaceExtractionConfig,
+    extract_openface_features_for_records,
+    write_manifest_jsonl,
+)
+
+
+def _build_index_command(args: argparse.Namespace) -> int:
+    daisee_root = Path(args.daisee_root).expanduser().resolve()
+    output_dir = Path(args.output_dir).expanduser().resolve()
+
+    records_by_split, diagnostics_by_split, leakage_report = build_full_index(
+        daisee_root=daisee_root,
+        target_label=args.target_label,
+        strict_paths=not args.allow_missing_paths,
+    )
+
+    ordered_records = [
+        record
+        for split in SPLIT_ORDER
+        for record in records_by_split.get(split, [])
+    ]
+
+    index_path = output_dir / "dataset_index.jsonl"
+    summary_path = output_dir / "index_summary.json"
+
+    write_records_jsonl(records=ordered_records, output_path=index_path)
+    summary = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "daisee_root": str(daisee_root),
+        "target_label": args.target_label,
+        "strict_paths": not args.allow_missing_paths,
+        "split_counts": {
+            split: len(records_by_split.get(split, [])) for split in SPLIT_ORDER
+        },
+        "diagnostics": {
+            split: diagnostics.to_dict()
+            for split, diagnostics in diagnostics_by_split.items()
+        },
+        "subject_leakage": leakage_report,
+    }
+    write_json(data=summary, output_path=summary_path)
+
+    print(f"Wrote index records to: {index_path}")
+    print(f"Wrote index summary to: {summary_path}")
+
+    total_missing_paths = sum(
+        len(diagnostics.missing_clip_paths)
+        for diagnostics in diagnostics_by_split.values()
+    )
+    if total_missing_paths > 0:
+        print(f"Warning: {total_missing_paths} label rows have missing clip files.")
+
+    if leakage_report:
+        print("Warning: subject overlap detected across splits.")
+    else:
+        print("Subject split check passed: no overlap detected.")
+
+    return 0
+
+
+def _sample_video_command(args: argparse.Namespace) -> int:
+    video_path = Path(args.video_path).expanduser().resolve()
+    if args.output_npy:
+        output_path = Path(args.output_npy).expanduser().resolve()
+        frames = save_sampled_frames_npy(
+            video_path=video_path,
+            output_path=output_path,
+            num_samples=args.num_samples,
+            to_rgb=not args.keep_bgr,
+        )
+        print(f"Saved sampled frames to: {output_path}")
+    else:
+        frames = sample_video_frames(
+            video_path=video_path,
+            num_samples=args.num_samples,
+            to_rgb=not args.keep_bgr,
+        )
+        print("Sampled frames in memory (no output file requested).")
+
+    print(f"Frame batch shape: {frames.shape}")
+    return 0
+
+
+def _extract_openface_command(args: argparse.Namespace) -> int:
+    index_path = Path(args.index_path).expanduser().resolve()
+    cache_root = Path(args.cache_dir).expanduser().resolve()
+    manifest_path = Path(args.manifest_path).expanduser().resolve()
+    summary_path = Path(args.summary_path).expanduser().resolve()
+
+    records = read_records_jsonl(index_path=index_path)
+    feature_flags = tuple(args.feature_flag) if args.feature_flag else DEFAULT_FEATURE_FLAGS
+    config = OpenFaceExtractionConfig(
+        executable=args.openface_bin,
+        feature_flags=feature_flags,
+        extra_args=tuple(args.extra_arg),
+        include_metadata_columns=args.include_metadata_columns,
+        success_only=not args.disable_success_filter,
+        copy_raw_csv=not args.skip_raw_csv_copy,
+        timeout_sec=args.timeout_sec,
+    )
+
+    max_clips = args.max_clips if args.max_clips > 0 else None
+    manifest_rows, summary = extract_openface_features_for_records(
+        records=records,
+        cache_root=cache_root,
+        config=config,
+        overwrite=args.overwrite,
+        max_clips=max_clips,
+    )
+
+    write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
+    write_json(data=summary, output_path=summary_path)
+
+    print(f"Loaded index records from: {index_path}")
+    print(f"Wrote extraction manifest to: {manifest_path}")
+    print(f"Wrote extraction summary to: {summary_path}")
+    print(
+        "OpenFace extraction summary: "
+        f"requested={summary['total_requested']}, "
+        f"succeeded={summary['succeeded']}, "
+        f"failed={summary['failed']}, "
+        f"cache_hits={summary['cache_hits']}, "
+        f"cache_misses={summary['cache_misses']}"
+    )
+
+    if summary["failed"] > 0:
+        print("Warning: some clips failed extraction. See manifest rows with non-empty error.")
+
+    return 0
+
+
+def _extract_cnn_command(args: argparse.Namespace) -> int:
+    index_path = Path(args.index_path).expanduser().resolve()
+    cache_root = Path(args.cache_dir).expanduser().resolve()
+    manifest_path = Path(args.manifest_path).expanduser().resolve()
+    summary_path = Path(args.summary_path).expanduser().resolve()
+
+    records = read_records_jsonl(index_path=index_path)
+    config = CNNExtractionConfig(
+        model_name=args.model_name,
+        pretrained=not args.no_pretrained,
+        weights=args.weights,
+        image_size=args.image_size,
+        num_samples=args.num_samples,
+        batch_size=args.batch_size,
+        device=args.device,
+    )
+
+    max_clips = args.max_clips if args.max_clips > 0 else None
+    manifest_rows, summary = extract_cnn_features_for_records(
+        records=records,
+        cache_root=cache_root,
+        config=config,
+        overwrite=args.overwrite,
+        max_clips=max_clips,
+    )
+
+    write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
+    write_json(data=summary, output_path=summary_path)
+
+    print(f"Loaded index records from: {index_path}")
+    print(f"Wrote CNN extraction manifest to: {manifest_path}")
+    print(f"Wrote CNN extraction summary to: {summary_path}")
+    print(
+        "CNN extraction summary: "
+        f"requested={summary['total_requested']}, "
+        f"succeeded={summary['succeeded']}, "
+        f"failed={summary['failed']}, "
+        f"cache_hits={summary['cache_hits']}, "
+        f"cache_misses={summary['cache_misses']}"
+    )
+
+    if summary["failed"] > 0:
+        print("Warning: some clips failed extraction. See manifest rows with non-empty error.")
+
+    return 0
+
+
+def _fuse_features_command(args: argparse.Namespace) -> int:
+    index_path = Path(args.index_path).expanduser().resolve()
+    openface_cache_root = Path(args.openface_cache_dir).expanduser().resolve()
+    cnn_cache_root = Path(args.cnn_cache_dir).expanduser().resolve()
+    fused_cache_root = Path(args.output_dir).expanduser().resolve()
+    manifest_path = Path(args.manifest_path).expanduser().resolve()
+    summary_path = Path(args.summary_path).expanduser().resolve()
+
+    records = read_records_jsonl(index_path=index_path)
+    config = FeatureFusionConfig(
+        alignment_mode=args.alignment_mode,
+        fusion_method=args.fusion_method,
+    )
+
+    max_clips = args.max_clips if args.max_clips > 0 else None
+    manifest_rows, summary = fuse_features_for_records(
+        records=records,
+        openface_cache_root=openface_cache_root,
+        cnn_cache_root=cnn_cache_root,
+        fused_cache_root=fused_cache_root,
+        config=config,
+        overwrite=args.overwrite,
+        max_clips=max_clips,
+    )
+
+    write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
+    write_json(data=summary, output_path=summary_path)
+
+    print(f"Loaded index records from: {index_path}")
+    print(f"Wrote fusion manifest to: {manifest_path}")
+    print(f"Wrote fusion summary to: {summary_path}")
+    print(
+        "Fusion summary: "
+        f"requested={summary['total_requested']}, "
+        f"succeeded={summary['succeeded']}, "
+        f"failed={summary['failed']}, "
+        f"cache_hits={summary['cache_hits']}, "
+        f"cache_misses={summary['cache_misses']}"
+    )
+
+    if summary["failed"] > 0:
+        print("Warning: some clips failed fusion. See manifest rows with non-empty error.")
+
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="engagement-pipeline",
+        description="DAiSEE engagement data utilities.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    index_parser = subparsers.add_parser(
+        "build-index",
+        help="Build Engagement index and split validation report from DAiSEE labels.",
+    )
+    index_parser.add_argument(
+        "--daisee-root",
+        required=True,
+        help="Path to DAiSEE root directory containing DataSet/ and Labels/.",
+    )
+    index_parser.add_argument(
+        "--output-dir",
+        default="artifacts/index",
+        help="Output directory for generated index files.",
+    )
+    index_parser.add_argument(
+        "--target-label",
+        default="Engagement",
+        help="Target label column from DAiSEE labels CSV.",
+    )
+    index_parser.add_argument(
+        "--allow-missing-paths",
+        action="store_true",
+        help="Keep rows with missing clip files in the index (clip_path will be empty).",
+    )
+    index_parser.set_defaults(handler=_build_index_command)
+
+    sample_parser = subparsers.add_parser(
+        "sample-video",
+        help="Uniformly sample frames from a video clip.",
+    )
+    sample_parser.add_argument(
+        "--video-path",
+        required=True,
+        help="Path to the source video clip.",
+    )
+    sample_parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=60,
+        help="Number of frames to sample.",
+    )
+    sample_parser.add_argument(
+        "--output-npy",
+        default="",
+        help="Optional .npy output path for sampled frame tensor.",
+    )
+    sample_parser.add_argument(
+        "--keep-bgr",
+        action="store_true",
+        help="Keep OpenCV BGR channel order instead of converting to RGB.",
+    )
+    sample_parser.set_defaults(handler=_sample_video_command)
+
+    extract_parser = subparsers.add_parser(
+        "extract-openface",
+        help="Extract and cache OpenFace features for clips in an index file.",
+    )
+    extract_parser.add_argument(
+        "--index-path",
+        default="artifacts/index/dataset_index.jsonl",
+        help="Path to index JSONL generated by build-index.",
+    )
+    extract_parser.add_argument(
+        "--openface-bin",
+        default="FeatureExtraction",
+        help="OpenFace FeatureExtraction executable path or command name.",
+    )
+    extract_parser.add_argument(
+        "--cache-dir",
+        default="artifacts/openface_cache",
+        help="Root directory for cached OpenFace features.",
+    )
+    extract_parser.add_argument(
+        "--manifest-path",
+        default="artifacts/openface_cache/extraction_manifest.jsonl",
+        help="Output JSONL path for per-clip extraction outcomes.",
+    )
+    extract_parser.add_argument(
+        "--summary-path",
+        default="artifacts/openface_cache/extraction_summary.json",
+        help="Output JSON path for extraction summary stats.",
+    )
+    extract_parser.add_argument(
+        "--timeout-sec",
+        type=int,
+        default=900,
+        help="Per-clip OpenFace process timeout in seconds.",
+    )
+    extract_parser.add_argument(
+        "--max-clips",
+        type=int,
+        default=0,
+        help="Optional cap on number of index rows to process (0 means all).",
+    )
+    extract_parser.add_argument(
+        "--feature-flag",
+        action="append",
+        default=[],
+        help="Override default OpenFace feature flags (repeatable).",
+    )
+    extract_parser.add_argument(
+        "--extra-arg",
+        action="append",
+        default=[],
+        help="Additional argument passed through to OpenFace (repeatable).",
+    )
+    extract_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Force re-extraction even when cache key matches.",
+    )
+    extract_parser.add_argument(
+        "--include-metadata-columns",
+        action="store_true",
+        help="Keep metadata columns like frame/timestamp in cached features.",
+    )
+    extract_parser.add_argument(
+        "--disable-success-filter",
+        action="store_true",
+        help="Do not filter OpenFace rows by success > 0.5.",
+    )
+    extract_parser.add_argument(
+        "--skip-raw-csv-copy",
+        action="store_true",
+        help="Do not copy OpenFace raw CSV into cache directories.",
+    )
+    extract_parser.set_defaults(handler=_extract_openface_command)
+
+    extract_cnn_parser = subparsers.add_parser(
+        "extract-cnn",
+        help="Extract and cache CNN frame embeddings for clips in an index file.",
+    )
+    extract_cnn_parser.add_argument(
+        "--index-path",
+        default="artifacts/index/dataset_index.jsonl",
+        help="Path to index JSONL generated by build-index.",
+    )
+    extract_cnn_parser.add_argument(
+        "--cache-dir",
+        default="artifacts/cnn_cache",
+        help="Root directory for cached CNN features.",
+    )
+    extract_cnn_parser.add_argument(
+        "--manifest-path",
+        default="artifacts/cnn_cache/extraction_manifest.jsonl",
+        help="Output JSONL path for per-clip extraction outcomes.",
+    )
+    extract_cnn_parser.add_argument(
+        "--summary-path",
+        default="artifacts/cnn_cache/extraction_summary.json",
+        help="Output JSON path for extraction summary stats.",
+    )
+    extract_cnn_parser.add_argument(
+        "--model-name",
+        default="efficientnet_b0",
+        help="Torchvision model name used as embedding backbone.",
+    )
+    extract_cnn_parser.add_argument(
+        "--weights",
+        default="DEFAULT",
+        help="Torchvision weight enum name (DEFAULT by default).",
+    )
+    extract_cnn_parser.add_argument(
+        "--no-pretrained",
+        action="store_true",
+        help="Disable pretrained weights and initialize model weights randomly.",
+    )
+    extract_cnn_parser.add_argument(
+        "--image-size",
+        type=int,
+        default=224,
+        help="Square image size for frame resizing before inference.",
+    )
+    extract_cnn_parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=60,
+        help="Number of uniformly sampled frames per clip.",
+    )
+    extract_cnn_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="Inference batch size in frames.",
+    )
+    extract_cnn_parser.add_argument(
+        "--device",
+        default="auto",
+        help="Inference device: auto, cpu, or cuda.",
+    )
+    extract_cnn_parser.add_argument(
+        "--max-clips",
+        type=int,
+        default=0,
+        help="Optional cap on number of index rows to process (0 means all).",
+    )
+    extract_cnn_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Force re-extraction even when cache key matches.",
+    )
+    extract_cnn_parser.set_defaults(handler=_extract_cnn_command)
+
+    fuse_parser = subparsers.add_parser(
+        "fuse-features",
+        help="Fuse cached OpenFace and CNN features clip-by-clip.",
+    )
+    fuse_parser.add_argument(
+        "--index-path",
+        default="artifacts/index/dataset_index.jsonl",
+        help="Path to index JSONL generated by build-index.",
+    )
+    fuse_parser.add_argument(
+        "--openface-cache-dir",
+        default="artifacts/openface_cache",
+        help="Root directory of cached OpenFace feature files.",
+    )
+    fuse_parser.add_argument(
+        "--cnn-cache-dir",
+        default="artifacts/cnn_cache",
+        help="Root directory of cached CNN feature files.",
+    )
+    fuse_parser.add_argument(
+        "--output-dir",
+        default="artifacts/fused_cache",
+        help="Output directory for fused features.",
+    )
+    fuse_parser.add_argument(
+        "--manifest-path",
+        default="artifacts/fused_cache/fusion_manifest.jsonl",
+        help="Output JSONL path for per-clip fusion outcomes.",
+    )
+    fuse_parser.add_argument(
+        "--summary-path",
+        default="artifacts/fused_cache/fusion_summary.json",
+        help="Output JSON path for fusion summary stats.",
+    )
+    fuse_parser.add_argument(
+        "--alignment-mode",
+        choices=list(ALIGNMENT_MODES),
+        default="truncate",
+        help="Temporal alignment strategy before feature fusion.",
+    )
+    fuse_parser.add_argument(
+        "--fusion-method",
+        choices=list(FUSION_METHODS),
+        default="concat",
+        help="Feature fusion method after temporal alignment.",
+    )
+    fuse_parser.add_argument(
+        "--max-clips",
+        type=int,
+        default=0,
+        help="Optional cap on number of index rows to process (0 means all).",
+    )
+    fuse_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Force re-fusion even when cache key matches.",
+    )
+    fuse_parser.set_defaults(handler=_fuse_features_command)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.handler(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
