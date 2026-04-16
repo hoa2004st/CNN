@@ -4,3 +4,7 @@ __pycache__/
 .env
 artifacts/
 *.egg-info/
+
+cmd.txt
+data/
+DAiSEE/
