@@ -14,6 +14,7 @@ from engagement_pipeline.data_index import (
     write_records_jsonl,
 )
 from engagement_pipeline.frame_sampling import save_sampled_frames_npy, sample_video_frames
+from engagement_pipeline.experiments import default_ablation_specs, run_ablation_suite
 from engagement_pipeline.fusion import (
     ALIGNMENT_MODES,
     FUSION_METHODS,
@@ -25,6 +26,13 @@ from engagement_pipeline.openface import (
     OpenFaceExtractionConfig,
     extract_openface_features_for_records,
     write_manifest_jsonl,
+)
+from engagement_pipeline.training import (
+    CLASSIFIER_CHOICES,
+    POOLING_MODES,
+    REDUCTION_METHODS,
+    TrainingConfig,
+    train_classifier_from_feature_cache,
 )
 
 
@@ -242,6 +250,105 @@ def _fuse_features_command(args: argparse.Namespace) -> int:
 
     if summary["failed"] > 0:
         print("Warning: some clips failed fusion. See manifest rows with non-empty error.")
+
+    return 0
+
+
+def _train_classifier_command(args: argparse.Namespace) -> int:
+    index_path = Path(args.index_path).expanduser().resolve()
+    feature_cache_root = Path(args.feature_cache_dir).expanduser().resolve()
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    manifest_path = Path(args.manifest_path).expanduser().resolve()
+    summary_path = Path(args.summary_path).expanduser().resolve()
+
+    records = read_records_jsonl(index_path=index_path)
+    config = TrainingConfig(
+        pooling_mode=args.pooling_mode,
+        reduction_method=args.reduction_method,
+        n_components=args.n_components,
+        use_smote=args.enable_smote,
+        smote_k_neighbors=args.smote_k_neighbors,
+        classifier_name=args.classifier_name,
+        class_weight=args.class_weight,
+        use_scaler=not args.disable_scaler,
+        random_seed=args.random_seed,
+    )
+
+    max_clips = args.max_clips if args.max_clips > 0 else None
+    manifest_rows, summary = train_classifier_from_feature_cache(
+        records=records,
+        feature_cache_root=feature_cache_root,
+        output_dir=output_dir,
+        config=config,
+        strict_features=not args.allow_missing_features,
+        max_clips=max_clips,
+    )
+
+    write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
+    write_json(data=summary, output_path=summary_path)
+
+    print(f"Loaded index records from: {index_path}")
+    print(f"Using feature cache root: {feature_cache_root}")
+    print(f"Wrote training manifest to: {manifest_path}")
+    print(f"Wrote training summary to: {summary_path}")
+    print(f"Model bundle: {summary['model_path']}")
+
+    val_metrics = summary.get("metrics", {}).get("validation", {})
+    test_metrics = summary.get("metrics", {}).get("test", {})
+    if val_metrics.get("available"):
+        print(
+            f"Validation: accuracy={val_metrics.get('accuracy', 0):.4f}, "
+            f"macro_f1={val_metrics.get('macro_f1', 0):.4f}"
+        )
+    if test_metrics.get("available"):
+        print(
+            f"Test: accuracy={test_metrics.get('accuracy', 0):.4f}, "
+            f"macro_f1={test_metrics.get('macro_f1', 0):.4f}"
+        )
+
+    return 0
+
+
+def _run_ablations_command(args: argparse.Namespace) -> int:
+    index_path = Path(args.index_path).expanduser().resolve()
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    openface_cache_root = Path(args.openface_cache_dir).expanduser().resolve()
+    cnn_cache_root = Path(args.cnn_cache_dir).expanduser().resolve()
+    fused_cache_root = Path(args.fused_cache_dir).expanduser().resolve()
+
+    records = read_records_jsonl(index_path=index_path)
+    specs = default_ablation_specs(
+        openface_cache_root=openface_cache_root,
+        cnn_cache_root=cnn_cache_root,
+        fused_cache_root=fused_cache_root,
+    )
+
+    max_clips = args.max_clips if args.max_clips > 0 else None
+    _, summary = run_ablation_suite(
+        records=records,
+        output_root=output_dir,
+        specs=specs,
+        pooling_mode=args.pooling_mode,
+        classifier_name=args.classifier_name,
+        class_weight=args.class_weight,
+        n_components=args.n_components,
+        smote_k_neighbors=args.smote_k_neighbors,
+        use_scaler=not args.disable_scaler,
+        random_seed=args.random_seed,
+        strict_features=not args.allow_missing_features,
+        max_clips=max_clips,
+    )
+
+    print(f"Loaded index records from: {index_path}")
+    print(f"Ablation output dir: {output_dir}")
+    print(f"Ablation summary: {output_dir / 'ablation_summary.json'}")
+    print(f"Ablation table: {output_dir / 'ablation_results.csv'}")
+    print(
+        "Ablation status: "
+        f"total={summary['total_runs']}, "
+        f"succeeded={summary['succeeded']}, "
+        f"failed={summary['failed']}"
+    )
 
     return 0
 
@@ -514,6 +621,183 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force re-fusion even when cache key matches.",
     )
     fuse_parser.set_defaults(handler=_fuse_features_command)
+
+    train_parser = subparsers.add_parser(
+        "train-classifier",
+        help="Train and evaluate a classifier from cached clip-level features.",
+    )
+    train_parser.add_argument(
+        "--index-path",
+        default="artifacts/index/dataset_index.jsonl",
+        help="Path to index JSONL generated by build-index.",
+    )
+    train_parser.add_argument(
+        "--feature-cache-dir",
+        default="artifacts/fused_cache",
+        help="Feature cache root used for training (fused/openface/cnn).",
+    )
+    train_parser.add_argument(
+        "--output-dir",
+        default="artifacts/training",
+        help="Output directory for trained model and metrics.",
+    )
+    train_parser.add_argument(
+        "--manifest-path",
+        default="artifacts/training/feature_manifest.jsonl",
+        help="Output JSONL path for loaded feature rows.",
+    )
+    train_parser.add_argument(
+        "--summary-path",
+        default="artifacts/training/train_summary.json",
+        help="Output JSON path for training summary.",
+    )
+    train_parser.add_argument(
+        "--pooling-mode",
+        choices=list(POOLING_MODES),
+        default="mean",
+        help="Clip-level pooling strategy for frame features.",
+    )
+    train_parser.add_argument(
+        "--reduction-method",
+        choices=list(REDUCTION_METHODS),
+        default="none",
+        help="Dimensionality reduction method before classifier fitting.",
+    )
+    train_parser.add_argument(
+        "--n-components",
+        type=int,
+        default=256,
+        help="Requested PCA/SVD components when reduction is enabled.",
+    )
+    train_parser.add_argument(
+        "--classifier-name",
+        choices=list(CLASSIFIER_CHOICES),
+        default="logistic_regression",
+        help="Classifier used for engagement prediction.",
+    )
+    train_parser.add_argument(
+        "--class-weight",
+        choices=["balanced", "none"],
+        default="balanced",
+        help="Class weighting strategy passed to supported classifiers.",
+    )
+    train_parser.add_argument(
+        "--enable-smote",
+        action="store_true",
+        help="Apply SMOTE on transformed training features.",
+    )
+    train_parser.add_argument(
+        "--smote-k-neighbors",
+        type=int,
+        default=5,
+        help="k_neighbors parameter for SMOTE when enabled.",
+    )
+    train_parser.add_argument(
+        "--disable-scaler",
+        action="store_true",
+        help="Disable StandardScaler preprocessing.",
+    )
+    train_parser.add_argument(
+        "--allow-missing-features",
+        action="store_true",
+        help="Skip rows with missing/broken feature files instead of failing early.",
+    )
+    train_parser.add_argument(
+        "--max-clips",
+        type=int,
+        default=0,
+        help="Optional cap on number of index rows to process (0 means all).",
+    )
+    train_parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible training transforms and models.",
+    )
+    train_parser.set_defaults(handler=_train_classifier_command)
+
+    ablation_parser = subparsers.add_parser(
+        "run-ablations",
+        help="Run default feature/reduction/SMOTE ablation suite.",
+    )
+    ablation_parser.add_argument(
+        "--index-path",
+        default="artifacts/index/dataset_index.jsonl",
+        help="Path to index JSONL generated by build-index.",
+    )
+    ablation_parser.add_argument(
+        "--openface-cache-dir",
+        default="artifacts/openface_cache",
+        help="OpenFace feature cache root.",
+    )
+    ablation_parser.add_argument(
+        "--cnn-cache-dir",
+        default="artifacts/cnn_cache",
+        help="CNN feature cache root.",
+    )
+    ablation_parser.add_argument(
+        "--fused-cache-dir",
+        default="artifacts/fused_cache",
+        help="Fused feature cache root.",
+    )
+    ablation_parser.add_argument(
+        "--output-dir",
+        default="artifacts/experiments",
+        help="Output directory for ablation artifacts.",
+    )
+    ablation_parser.add_argument(
+        "--pooling-mode",
+        choices=list(POOLING_MODES),
+        default="mean",
+        help="Clip-level pooling strategy for frame features.",
+    )
+    ablation_parser.add_argument(
+        "--classifier-name",
+        choices=list(CLASSIFIER_CHOICES),
+        default="logistic_regression",
+        help="Classifier used across ablation runs.",
+    )
+    ablation_parser.add_argument(
+        "--class-weight",
+        choices=["balanced", "none"],
+        default="balanced",
+        help="Class weighting strategy passed to supported classifiers.",
+    )
+    ablation_parser.add_argument(
+        "--n-components",
+        type=int,
+        default=256,
+        help="Requested PCA/SVD components for reduction ablations.",
+    )
+    ablation_parser.add_argument(
+        "--smote-k-neighbors",
+        type=int,
+        default=5,
+        help="k_neighbors parameter for SMOTE-enabled ablations.",
+    )
+    ablation_parser.add_argument(
+        "--disable-scaler",
+        action="store_true",
+        help="Disable StandardScaler preprocessing.",
+    )
+    ablation_parser.add_argument(
+        "--allow-missing-features",
+        action="store_true",
+        help="Skip rows with missing/broken feature files instead of failing early.",
+    )
+    ablation_parser.add_argument(
+        "--max-clips",
+        type=int,
+        default=0,
+        help="Optional cap on number of index rows to process (0 means all).",
+    )
+    ablation_parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible ablation runs.",
+    )
+    ablation_parser.set_defaults(handler=_run_ablations_command)
 
     return parser
 
