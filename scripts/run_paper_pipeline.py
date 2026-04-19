@@ -64,8 +64,16 @@ def main() -> int:
     parser.add_argument("--daisee-root", required=True, help="Path to DAiSEE dataset root.")
     parser.add_argument(
         "--output-root",
-        default="artifacts/paper_run",
+        default="outputs/paper_run",
         help="Root directory for all generated artifacts.",
+    )
+    parser.add_argument(
+        "--feature-root",
+        default="",
+        help=(
+            "Optional root directory for extracted feature caches. "
+            "Defaults to <output-root>/features so caches live in one tracked folder."
+        ),
     )
     parser.add_argument(
         "--openface-bin",
@@ -172,12 +180,18 @@ def main() -> int:
     daisee_root = Path(args.daisee_root).expanduser().resolve()
     output_root = Path(args.output_root).expanduser().resolve()
     index_dir = output_root / "index"
-    openface_cache_dir = output_root / "openface_cache"
-    cnn_cache_dir = output_root / "cnn_cache"
-    fused_cache_dir = output_root / "fused_cache"
+    feature_root = (
+        Path(args.feature_root).expanduser().resolve()
+        if args.feature_root
+        else output_root / "features"
+    )
+    openface_cache_dir = feature_root / "openface_cache"
+    cnn_cache_dir = feature_root / "cnn_cache"
+    fused_cache_dir = feature_root / "fused_cache"
     training_dir = output_root / "training"
     experiments_dir = output_root / "experiments"
     output_root.mkdir(parents=True, exist_ok=True)
+    feature_root.mkdir(parents=True, exist_ok=True)
 
     index_path = _run_build_index(
         daisee_root=daisee_root,
@@ -198,6 +212,7 @@ def main() -> int:
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "daisee_root": str(daisee_root),
         "output_root": str(output_root),
+        "feature_root": str(feature_root),
         "selection": {
             "splits": args.split,
             "max_clips": args.max_clips,

@@ -2,7 +2,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
-artifacts/
 *.egg-info/
 
 cmd.txt

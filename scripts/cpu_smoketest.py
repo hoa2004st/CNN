@@ -342,7 +342,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="CPU-only smoke test runner for engagement pipeline")
     parser.add_argument(
         "--output-root",
-        default="artifacts/cpu_smoketest",
+        default="outputs/cpu_smoketest",
         help="Directory where smoke test artifacts will be generated",
     )
     parser.add_argument(
