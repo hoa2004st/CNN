@@ -21,6 +21,7 @@ from engagement_pipeline.openface import (
     extract_openface_features_for_records,
     write_manifest_jsonl,
 )
+from engagement_pipeline.path_utils import resolve_user_path
 from engagement_pipeline.training import TrainingConfig, train_classifier_from_feature_cache
 
 
@@ -177,11 +178,11 @@ def main() -> int:
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
-    daisee_root = Path(args.daisee_root).expanduser().resolve()
-    output_root = Path(args.output_root).expanduser().resolve()
+    daisee_root = resolve_user_path(args.daisee_root)
+    output_root = resolve_user_path(args.output_root)
     index_dir = output_root / "index"
     feature_root = (
-        Path(args.feature_root).expanduser().resolve()
+        resolve_user_path(args.feature_root)
         if args.feature_root
         else output_root / "features"
     )

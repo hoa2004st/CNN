@@ -28,6 +28,7 @@ from engagement_pipeline.openface import (
     extract_openface_features_for_records,
     write_manifest_jsonl,
 )
+from engagement_pipeline.path_utils import resolve_user_path
 from engagement_pipeline.training import (
     CLASSIFIER_CHOICES,
     POOLING_MODES,
@@ -38,8 +39,8 @@ from engagement_pipeline.training import (
 
 
 def _build_index_command(args: argparse.Namespace) -> int:
-    daisee_root = Path(args.daisee_root).expanduser().resolve()
-    output_dir = Path(args.output_dir).expanduser().resolve()
+    daisee_root = resolve_user_path(args.daisee_root)
+    output_dir = resolve_user_path(args.output_dir)
 
     records_by_split, diagnostics_by_split, leakage_report = build_full_index(
         daisee_root=daisee_root,
@@ -92,9 +93,9 @@ def _build_index_command(args: argparse.Namespace) -> int:
 
 
 def _sample_video_command(args: argparse.Namespace) -> int:
-    video_path = Path(args.video_path).expanduser().resolve()
+    video_path = resolve_user_path(args.video_path)
     if args.output_npy:
-        output_path = Path(args.output_npy).expanduser().resolve()
+        output_path = resolve_user_path(args.output_npy)
         frames = save_sampled_frames_npy(
             video_path=video_path,
             output_path=output_path,
@@ -115,10 +116,10 @@ def _sample_video_command(args: argparse.Namespace) -> int:
 
 
 def _extract_openface_command(args: argparse.Namespace) -> int:
-    index_path = Path(args.index_path).expanduser().resolve()
-    cache_root = Path(args.cache_dir).expanduser().resolve()
-    manifest_path = Path(args.manifest_path).expanduser().resolve()
-    summary_path = Path(args.summary_path).expanduser().resolve()
+    index_path = resolve_user_path(args.index_path)
+    cache_root = resolve_user_path(args.cache_dir)
+    manifest_path = resolve_user_path(args.manifest_path)
+    summary_path = resolve_user_path(args.summary_path)
 
     records = filter_records(
         records=read_records_jsonl(index_path=index_path),
@@ -166,10 +167,10 @@ def _extract_openface_command(args: argparse.Namespace) -> int:
 
 
 def _extract_cnn_command(args: argparse.Namespace) -> int:
-    index_path = Path(args.index_path).expanduser().resolve()
-    cache_root = Path(args.cache_dir).expanduser().resolve()
-    manifest_path = Path(args.manifest_path).expanduser().resolve()
-    summary_path = Path(args.summary_path).expanduser().resolve()
+    index_path = resolve_user_path(args.index_path)
+    cache_root = resolve_user_path(args.cache_dir)
+    manifest_path = resolve_user_path(args.manifest_path)
+    summary_path = resolve_user_path(args.summary_path)
 
     records = filter_records(
         records=read_records_jsonl(index_path=index_path),
@@ -216,12 +217,12 @@ def _extract_cnn_command(args: argparse.Namespace) -> int:
 
 
 def _fuse_features_command(args: argparse.Namespace) -> int:
-    index_path = Path(args.index_path).expanduser().resolve()
-    openface_cache_root = Path(args.openface_cache_dir).expanduser().resolve()
-    cnn_cache_root = Path(args.cnn_cache_dir).expanduser().resolve()
-    fused_cache_root = Path(args.output_dir).expanduser().resolve()
-    manifest_path = Path(args.manifest_path).expanduser().resolve()
-    summary_path = Path(args.summary_path).expanduser().resolve()
+    index_path = resolve_user_path(args.index_path)
+    openface_cache_root = resolve_user_path(args.openface_cache_dir)
+    cnn_cache_root = resolve_user_path(args.cnn_cache_dir)
+    fused_cache_root = resolve_user_path(args.output_dir)
+    manifest_path = resolve_user_path(args.manifest_path)
+    summary_path = resolve_user_path(args.summary_path)
 
     records = filter_records(
         records=read_records_jsonl(index_path=index_path),
@@ -265,11 +266,11 @@ def _fuse_features_command(args: argparse.Namespace) -> int:
 
 
 def _train_classifier_command(args: argparse.Namespace) -> int:
-    index_path = Path(args.index_path).expanduser().resolve()
-    feature_cache_root = Path(args.feature_cache_dir).expanduser().resolve()
-    output_dir = Path(args.output_dir).expanduser().resolve()
-    manifest_path = Path(args.manifest_path).expanduser().resolve()
-    summary_path = Path(args.summary_path).expanduser().resolve()
+    index_path = resolve_user_path(args.index_path)
+    feature_cache_root = resolve_user_path(args.feature_cache_dir)
+    output_dir = resolve_user_path(args.output_dir)
+    manifest_path = resolve_user_path(args.manifest_path)
+    summary_path = resolve_user_path(args.summary_path)
 
     records = filter_records(
         records=read_records_jsonl(index_path=index_path),
@@ -323,11 +324,11 @@ def _train_classifier_command(args: argparse.Namespace) -> int:
 
 
 def _run_ablations_command(args: argparse.Namespace) -> int:
-    index_path = Path(args.index_path).expanduser().resolve()
-    output_dir = Path(args.output_dir).expanduser().resolve()
-    openface_cache_root = Path(args.openface_cache_dir).expanduser().resolve()
-    cnn_cache_root = Path(args.cnn_cache_dir).expanduser().resolve()
-    fused_cache_root = Path(args.fused_cache_dir).expanduser().resolve()
+    index_path = resolve_user_path(args.index_path)
+    output_dir = resolve_user_path(args.output_dir)
+    openface_cache_root = resolve_user_path(args.openface_cache_dir)
+    cnn_cache_root = resolve_user_path(args.cnn_cache_dir)
+    fused_cache_root = resolve_user_path(args.fused_cache_dir)
 
     records = filter_records(
         records=read_records_jsonl(index_path=index_path),
