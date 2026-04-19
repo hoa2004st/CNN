@@ -58,6 +58,51 @@ def _run_build_index(daisee_root: Path, index_dir: Path, allow_missing_paths: bo
     return index_path
 
 
+def _write_run_summary(run_summary: dict[str, object], output_root: Path) -> None:
+    write_json(data=run_summary, output_path=output_root / "run_summary.json")
+
+
+def _first_manifest_error(rows: list[dict[str, object]]) -> str:
+    for row in rows:
+        error = str(row.get("error", "")).strip()
+        if error:
+            return error
+    return ""
+
+
+def _validate_extraction_stage(
+    *,
+    stage_name: str,
+    summary: dict[str, object],
+    manifest_rows: list[dict[str, object]],
+    summary_path: Path,
+    manifest_path: Path,
+    require_complete: bool,
+) -> None:
+    total_requested = int(summary.get("total_requested", 0))
+    succeeded = int(summary.get("succeeded", 0))
+    failed = int(summary.get("failed", 0))
+
+    if total_requested <= 0:
+        raise RuntimeError(f"{stage_name} had no selected records to process.")
+
+    if succeeded <= 0:
+        first_error = _first_manifest_error(manifest_rows) or "unknown error"
+        raise RuntimeError(
+            f"{stage_name} produced zero successful outputs. "
+            f"Summary: {summary_path}. Manifest: {manifest_path}. First error: {first_error}"
+        )
+
+    if require_complete and failed > 0:
+        first_error = _first_manifest_error(manifest_rows) or "unknown error"
+        raise RuntimeError(
+            f"{stage_name} failed for {failed}/{total_requested} records, so downstream strict training "
+            f"cannot continue. Re-run after fixing the extraction issue, or use --allow-missing-features "
+            f"to continue with partial caches. Summary: {summary_path}. Manifest: {manifest_path}. "
+            f"First error: {first_error}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="One-shot runner for the DAiSEE paper reproduction pipeline."
@@ -222,6 +267,7 @@ def main() -> int:
         },
         "steps": {},
     }
+    _write_run_summary(run_summary, output_root)
 
     if not args.skip_openface:
         openface_config = OpenFaceExtractionConfig(
@@ -238,8 +284,19 @@ def main() -> int:
             rows=manifest_rows,
             output_path=openface_cache_dir / "extraction_manifest.jsonl",
         )
-        write_json(data=summary, output_path=openface_cache_dir / "extraction_summary.json")
+        openface_summary_path = openface_cache_dir / "extraction_summary.json"
+        openface_manifest_path = openface_cache_dir / "extraction_manifest.jsonl"
+        write_json(data=summary, output_path=openface_summary_path)
         run_summary["steps"]["openface"] = summary
+        _write_run_summary(run_summary, output_root)
+        _validate_extraction_stage(
+            stage_name="OpenFace extraction",
+            summary=summary,
+            manifest_rows=manifest_rows,
+            summary_path=openface_summary_path,
+            manifest_path=openface_manifest_path,
+            require_complete=not args.allow_missing_features,
+        )
 
     if not args.skip_cnn:
         cnn_config = CNNExtractionConfig(
@@ -261,8 +318,19 @@ def main() -> int:
             rows=manifest_rows,
             output_path=cnn_cache_dir / "extraction_manifest.jsonl",
         )
-        write_json(data=summary, output_path=cnn_cache_dir / "extraction_summary.json")
+        cnn_summary_path = cnn_cache_dir / "extraction_summary.json"
+        cnn_manifest_path = cnn_cache_dir / "extraction_manifest.jsonl"
+        write_json(data=summary, output_path=cnn_summary_path)
         run_summary["steps"]["cnn"] = summary
+        _write_run_summary(run_summary, output_root)
+        _validate_extraction_stage(
+            stage_name="CNN extraction",
+            summary=summary,
+            manifest_rows=manifest_rows,
+            summary_path=cnn_summary_path,
+            manifest_path=cnn_manifest_path,
+            require_complete=not args.allow_missing_features,
+        )
 
     if not args.skip_fusion:
         fusion_config = FeatureFusionConfig(alignment_mode="truncate", fusion_method="concat")
@@ -278,8 +346,19 @@ def main() -> int:
             rows=manifest_rows,
             output_path=fused_cache_dir / "fusion_manifest.jsonl",
         )
-        write_json(data=summary, output_path=fused_cache_dir / "fusion_summary.json")
+        fusion_summary_path = fused_cache_dir / "fusion_summary.json"
+        fusion_manifest_path = fused_cache_dir / "fusion_manifest.jsonl"
+        write_json(data=summary, output_path=fusion_summary_path)
         run_summary["steps"]["fusion"] = summary
+        _write_run_summary(run_summary, output_root)
+        _validate_extraction_stage(
+            stage_name="Feature fusion",
+            summary=summary,
+            manifest_rows=manifest_rows,
+            summary_path=fusion_summary_path,
+            manifest_path=fusion_manifest_path,
+            require_complete=not args.allow_missing_features,
+        )
 
     if not args.skip_training:
         _, summary = train_classifier_from_feature_cache(
@@ -300,6 +379,7 @@ def main() -> int:
             strict_features=not args.allow_missing_features,
         )
         run_summary["steps"]["training"] = summary
+        _write_run_summary(run_summary, output_root)
 
     if not args.skip_ablations:
         _, summary = run_ablation_suite(
@@ -320,8 +400,9 @@ def main() -> int:
             strict_features=not args.allow_missing_features,
         )
         run_summary["steps"]["ablations"] = summary
+        _write_run_summary(run_summary, output_root)
 
-    write_json(data=run_summary, output_path=output_root / "run_summary.json")
+    _write_run_summary(run_summary, output_root)
     print(json.dumps(run_summary, indent=2, ensure_ascii=True))
     return 0
 
