@@ -365,6 +365,15 @@ def _evaluate_split(y_true: np.ndarray, y_pred: np.ndarray, labels: List[int]) -
     }
 
 
+def _label_distribution(values: np.ndarray) -> Dict[str, int]:
+    if values.shape[0] == 0:
+        return {}
+    return {
+        str(int(label)): int(count)
+        for label, count in zip(*np.unique(values, return_counts=True), strict=True)
+    }
+
+
 def train_classifier_from_feature_cache(
     records: Sequence[ClipRecord],
     feature_cache_root: Path,
@@ -476,6 +485,11 @@ def train_classifier_from_feature_cache(
         "strict_features": strict_features,
         "config": normalized_config.to_dict(),
         "feature_load": load_summary,
+        "label_distribution": {
+            "train": _label_distribution(train_y),
+            "validation": _label_distribution(val_y),
+            "test": _label_distribution(test_y),
+        },
         "transform": transform_info,
         "smote": {
             "class_distribution_before": class_distribution_before,

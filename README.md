@@ -10,6 +10,7 @@ This repository now contains an end-to-end executable implementation for the cor
 - OpenFace/CNN feature fusion interface
 - PCA/SVD reduction + optional SMOTE + classifier training/evaluation
 - Reproducible ablation runner
+- One-shot paper runner for full-dataset or sharded execution
 - CLI entrypoints for each pipeline stage
 
 ## Project Layout
@@ -22,6 +23,7 @@ This repository now contains an end-to-end executable implementation for the cor
 - `src/engagement_pipeline/training.py`: clip-level pooling, reduction, SMOTE, and classifier training
 - `src/engagement_pipeline/experiments.py`: default ablation suite runner
 - `src/engagement_pipeline/cli.py`: command-line interface
+- `scripts/run_paper_pipeline.py`: orchestrate the full paper pipeline into one output root
 - `artifacts/`: generated outputs (ignored by git)
 
 ## Setup
@@ -64,6 +66,7 @@ python -m engagement_pipeline.cli extract-openface --index-path "artifacts\index
 Useful options:
 
 - `--max-clips 20`: run a small smoke test on first 20 clips
+- `--split train --max-clips-per-split 200`: shard long extraction runs by split or cap clips per split
 - `--overwrite`: ignore existing cache and force re-extraction
 - `--feature-flag -aus --feature-flag -pose`: replace default feature flags
 - `--extra-arg -q`: pass additional OpenFace arguments
@@ -87,7 +90,7 @@ Useful options:
 - `--image-size 224`: resize side for each frame
 - `--batch-size 16`: inference batch size
 - `--no-pretrained`: disable ImageNet weights
-- `--max-clips 20`: run a short smoke test
+- `--split validation --max-clips-per-split 100`: run a bounded extraction job on a subset
 
 Outputs:
 
@@ -106,7 +109,7 @@ Useful options:
 
 - `--alignment-mode truncate|pad_repeat_last|interpolate_max`
 - `--fusion-method concat|add`
-- `--max-clips 20`: run a short smoke test
+- `--split train --max-clips-per-split 500`: fuse only a selected shard
 
 Outputs:
 
@@ -128,12 +131,13 @@ Useful options:
 - `--reduction-method none|pca|svd`
 - `--classifier-name logistic_regression|linear_svm|random_forest|mlp`
 - `--allow-missing-features`: continue if some cached feature files are missing
+- `--max-clips-per-split 250`: fast sanity-check run with train/validation/test all represented
 
 Outputs:
 
 - `artifacts/training/model_bundle.joblib`: persisted scaler/reducer/classifier bundle
 - `artifacts/training/feature_manifest.jsonl`: feature-loading result for each clip
-- `artifacts/training/train_summary.json`: split metrics, confusion matrices, transform settings, and SMOTE report
+- `artifacts/training/train_summary.json`: split metrics, confusion matrices, label distributions, transform settings, and SMOTE report
 
 ## Run Default Ablation Suite
 
@@ -153,8 +157,30 @@ Default ablation runs include:
 Outputs:
 
 - `artifacts/experiments/ablation_results.csv`: compact table for quick comparison
-- `artifacts/experiments/ablation_summary.json`: full run metadata and status
+- `artifacts/experiments/ablation_summary.json`: full run metadata, status, and best-run selection
 - `artifacts/experiments/<run_name>/`: per-run training artifacts
+
+## Run The Full Paper Pipeline
+
+This wraps indexing, OpenFace extraction, CNN extraction, fusion, fused-model training, and the default ablation suite into one reproducible output root:
+
+```powershell
+python scripts/run_paper_pipeline.py --daisee-root "data\DAiSEE" --output-root "artifacts\paper_run" --openface-bin "FeatureExtraction" --cnn-device auto --enable-smote
+```
+
+Useful options:
+
+- `--skip-openface|--skip-cnn|--skip-fusion|--skip-training|--skip-ablations`: resume from existing caches
+- `--split train --max-clips-per-split 1000`: shard long jobs for rented servers
+- `--overwrite`: force regeneration instead of reusing cache
+
+Primary outputs:
+
+- `artifacts/paper_run/run_summary.json`: top-level record of the run
+- `artifacts/paper_run/index/`: generated dataset index and diagnostics
+- `artifacts/paper_run/openface_cache/`, `cnn_cache/`, `fused_cache/`: feature caches
+- `artifacts/paper_run/training/`: main fused training run
+- `artifacts/paper_run/experiments/`: ablation suite
 
 ## Rented Server Next Steps
 
@@ -162,9 +188,9 @@ Outputs:
 2. Clone repository and install dependencies.
 3. Download or copy DAiSEE to server and confirm `DataSet/` and `Labels/` exist.
 4. Build index with `build-index` and verify split counts in `artifacts/index/index_summary.json`.
-5. Run `extract-openface` (requires OpenFace `FeatureExtraction` binary available in PATH).
-6. Run `extract-cnn` and check `artifacts/cnn_cache/extraction_summary.json`.
-7. Run `fuse-features` and confirm non-zero success count in `artifacts/fused_cache/fusion_summary.json`.
-8. Run `train-classifier` for your chosen setup and inspect validation/test macro-F1 in `artifacts/training/train_summary.json`.
-9. Run `run-ablations` and review `artifacts/experiments/ablation_results.csv` to pick the best configuration.
+5. Prefer `python scripts/run_paper_pipeline.py --daisee-root "data/DAiSEE" --output-root "artifacts/paper_run" --openface-bin "FeatureExtraction"` for a full run.
+6. If the full run is too long for one session, shard it with `--split ...` and `--max-clips-per-split ...`, then resume with `--skip-*` flags.
+7. Check `artifacts/paper_run/run_summary.json` after each stage to verify non-zero success counts.
+8. Inspect `artifacts/paper_run/training/train_summary.json` for validation/test macro-F1 and class distribution.
+9. Review `artifacts/paper_run/experiments/ablation_results.csv` and `ablation_summary.json` to choose the best configuration.
 10. Download only the needed artifacts (`training/`, `experiments/`, selected cache summaries) back to local machine.

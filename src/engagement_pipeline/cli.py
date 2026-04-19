@@ -9,6 +9,7 @@ from engagement_pipeline.cnn import CNNExtractionConfig, extract_cnn_features_fo
 from engagement_pipeline.data_index import (
     SPLIT_ORDER,
     build_full_index,
+    filter_records,
     read_records_jsonl,
     write_json,
     write_records_jsonl,
@@ -119,7 +120,12 @@ def _extract_openface_command(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest_path).expanduser().resolve()
     summary_path = Path(args.summary_path).expanduser().resolve()
 
-    records = read_records_jsonl(index_path=index_path)
+    records = filter_records(
+        records=read_records_jsonl(index_path=index_path),
+        splits=args.split,
+        max_clips=args.max_clips if args.max_clips > 0 else None,
+        max_clips_per_split=args.max_clips_per_split if args.max_clips_per_split > 0 else None,
+    )
     feature_flags = tuple(args.feature_flag) if args.feature_flag else DEFAULT_FEATURE_FLAGS
     config = OpenFaceExtractionConfig(
         executable=args.openface_bin,
@@ -131,13 +137,11 @@ def _extract_openface_command(args: argparse.Namespace) -> int:
         timeout_sec=args.timeout_sec,
     )
 
-    max_clips = args.max_clips if args.max_clips > 0 else None
     manifest_rows, summary = extract_openface_features_for_records(
         records=records,
         cache_root=cache_root,
         config=config,
         overwrite=args.overwrite,
-        max_clips=max_clips,
     )
 
     write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
@@ -167,7 +171,12 @@ def _extract_cnn_command(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest_path).expanduser().resolve()
     summary_path = Path(args.summary_path).expanduser().resolve()
 
-    records = read_records_jsonl(index_path=index_path)
+    records = filter_records(
+        records=read_records_jsonl(index_path=index_path),
+        splits=args.split,
+        max_clips=args.max_clips if args.max_clips > 0 else None,
+        max_clips_per_split=args.max_clips_per_split if args.max_clips_per_split > 0 else None,
+    )
     config = CNNExtractionConfig(
         model_name=args.model_name,
         pretrained=not args.no_pretrained,
@@ -178,13 +187,11 @@ def _extract_cnn_command(args: argparse.Namespace) -> int:
         device=args.device,
     )
 
-    max_clips = args.max_clips if args.max_clips > 0 else None
     manifest_rows, summary = extract_cnn_features_for_records(
         records=records,
         cache_root=cache_root,
         config=config,
         overwrite=args.overwrite,
-        max_clips=max_clips,
     )
 
     write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
@@ -216,13 +223,17 @@ def _fuse_features_command(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest_path).expanduser().resolve()
     summary_path = Path(args.summary_path).expanduser().resolve()
 
-    records = read_records_jsonl(index_path=index_path)
+    records = filter_records(
+        records=read_records_jsonl(index_path=index_path),
+        splits=args.split,
+        max_clips=args.max_clips if args.max_clips > 0 else None,
+        max_clips_per_split=args.max_clips_per_split if args.max_clips_per_split > 0 else None,
+    )
     config = FeatureFusionConfig(
         alignment_mode=args.alignment_mode,
         fusion_method=args.fusion_method,
     )
 
-    max_clips = args.max_clips if args.max_clips > 0 else None
     manifest_rows, summary = fuse_features_for_records(
         records=records,
         openface_cache_root=openface_cache_root,
@@ -230,7 +241,6 @@ def _fuse_features_command(args: argparse.Namespace) -> int:
         fused_cache_root=fused_cache_root,
         config=config,
         overwrite=args.overwrite,
-        max_clips=max_clips,
     )
 
     write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
@@ -261,7 +271,12 @@ def _train_classifier_command(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest_path).expanduser().resolve()
     summary_path = Path(args.summary_path).expanduser().resolve()
 
-    records = read_records_jsonl(index_path=index_path)
+    records = filter_records(
+        records=read_records_jsonl(index_path=index_path),
+        splits=args.split,
+        max_clips=args.max_clips if args.max_clips > 0 else None,
+        max_clips_per_split=args.max_clips_per_split if args.max_clips_per_split > 0 else None,
+    )
     config = TrainingConfig(
         pooling_mode=args.pooling_mode,
         reduction_method=args.reduction_method,
@@ -274,14 +289,12 @@ def _train_classifier_command(args: argparse.Namespace) -> int:
         random_seed=args.random_seed,
     )
 
-    max_clips = args.max_clips if args.max_clips > 0 else None
     manifest_rows, summary = train_classifier_from_feature_cache(
         records=records,
         feature_cache_root=feature_cache_root,
         output_dir=output_dir,
         config=config,
         strict_features=not args.allow_missing_features,
-        max_clips=max_clips,
     )
 
     write_manifest_jsonl(rows=manifest_rows, output_path=manifest_path)
@@ -316,14 +329,18 @@ def _run_ablations_command(args: argparse.Namespace) -> int:
     cnn_cache_root = Path(args.cnn_cache_dir).expanduser().resolve()
     fused_cache_root = Path(args.fused_cache_dir).expanduser().resolve()
 
-    records = read_records_jsonl(index_path=index_path)
+    records = filter_records(
+        records=read_records_jsonl(index_path=index_path),
+        splits=args.split,
+        max_clips=args.max_clips if args.max_clips > 0 else None,
+        max_clips_per_split=args.max_clips_per_split if args.max_clips_per_split > 0 else None,
+    )
     specs = default_ablation_specs(
         openface_cache_root=openface_cache_root,
         cnn_cache_root=cnn_cache_root,
         fused_cache_root=fused_cache_root,
     )
 
-    max_clips = args.max_clips if args.max_clips > 0 else None
     _, summary = run_ablation_suite(
         records=records,
         output_root=output_dir,
@@ -336,7 +353,6 @@ def _run_ablations_command(args: argparse.Namespace) -> int:
         use_scaler=not args.disable_scaler,
         random_seed=args.random_seed,
         strict_features=not args.allow_missing_features,
-        max_clips=max_clips,
     )
 
     print(f"Loaded index records from: {index_path}")
@@ -359,6 +375,26 @@ def build_parser() -> argparse.ArgumentParser:
         description="DAiSEE engagement data utilities.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    def add_record_selection_arguments(target_parser: argparse.ArgumentParser) -> None:
+        target_parser.add_argument(
+            "--split",
+            action="append",
+            default=[],
+            help="Restrict processing to one or more splits (repeatable: train, validation, test).",
+        )
+        target_parser.add_argument(
+            "--max-clips",
+            type=int,
+            default=0,
+            help="Optional cap on number of selected records to process after filtering (0 means all).",
+        )
+        target_parser.add_argument(
+            "--max-clips-per-split",
+            type=int,
+            default=0,
+            help="Optional per-split cap applied before any global max-clips limit (0 means all).",
+        )
 
     index_parser = subparsers.add_parser(
         "build-index",
@@ -448,12 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=900,
         help="Per-clip OpenFace process timeout in seconds.",
     )
-    extract_parser.add_argument(
-        "--max-clips",
-        type=int,
-        default=0,
-        help="Optional cap on number of index rows to process (0 means all).",
-    )
+    add_record_selection_arguments(extract_parser)
     extract_parser.add_argument(
         "--feature-flag",
         action="append",
@@ -550,12 +581,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Inference device: auto, cpu, or cuda.",
     )
-    extract_cnn_parser.add_argument(
-        "--max-clips",
-        type=int,
-        default=0,
-        help="Optional cap on number of index rows to process (0 means all).",
-    )
+    add_record_selection_arguments(extract_cnn_parser)
     extract_cnn_parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -609,12 +635,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="concat",
         help="Feature fusion method after temporal alignment.",
     )
-    fuse_parser.add_argument(
-        "--max-clips",
-        type=int,
-        default=0,
-        help="Optional cap on number of index rows to process (0 means all).",
-    )
+    add_record_selection_arguments(fuse_parser)
     fuse_parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -702,12 +723,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip rows with missing/broken feature files instead of failing early.",
     )
-    train_parser.add_argument(
-        "--max-clips",
-        type=int,
-        default=0,
-        help="Optional cap on number of index rows to process (0 means all).",
-    )
+    add_record_selection_arguments(train_parser)
     train_parser.add_argument(
         "--random-seed",
         type=int,
@@ -785,12 +801,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip rows with missing/broken feature files instead of failing early.",
     )
-    ablation_parser.add_argument(
-        "--max-clips",
-        type=int,
-        default=0,
-        help="Optional cap on number of index rows to process (0 means all).",
-    )
+    add_record_selection_arguments(ablation_parser)
     ablation_parser.add_argument(
         "--random-seed",
         type=int,

@@ -57,6 +57,40 @@ def normalize_split(split: str) -> str:
     return normalized
 
 
+def filter_records(
+    records: Sequence[ClipRecord],
+    splits: Sequence[str] | None = None,
+    max_clips: int | None = None,
+    max_clips_per_split: int | None = None,
+) -> List[ClipRecord]:
+    if max_clips is not None and max_clips <= 0:
+        raise ValueError("max_clips must be positive when provided")
+    if max_clips_per_split is not None and max_clips_per_split <= 0:
+        raise ValueError("max_clips_per_split must be positive when provided")
+
+    allowed_splits = None
+    if splits:
+        allowed_splits = {normalize_split(split) for split in splits}
+
+    selected: List[ClipRecord] = []
+    per_split_counts: Dict[str, int] = {split: 0 for split in SPLIT_ORDER}
+
+    for record in records:
+        if allowed_splits is not None and record.split not in allowed_splits:
+            continue
+
+        if max_clips_per_split is not None and per_split_counts[record.split] >= max_clips_per_split:
+            continue
+
+        selected.append(record)
+        per_split_counts[record.split] += 1
+
+        if max_clips is not None and len(selected) >= max_clips:
+            break
+
+    return selected
+
+
 def _get_row_field(row: Dict[str, str], target_field: str) -> str:
     target = target_field.strip().lower()
     for key, value in row.items():

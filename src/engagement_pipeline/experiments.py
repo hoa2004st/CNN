@@ -94,6 +94,16 @@ def _write_results_csv(rows: Sequence[Dict[str, Any]], output_path: Path) -> Non
             writer.writerow({field: row.get(field, "") for field in fieldnames})
 
 
+def _sort_key(row: Dict[str, Any]) -> tuple[float, float, float]:
+    if row.get("status") != "ok":
+        return (-1.0, -1.0, -1.0)
+    return (
+        float(row.get("validation_macro_f1") or 0.0),
+        float(row.get("test_macro_f1") or 0.0),
+        float(row.get("validation_accuracy") or 0.0),
+    )
+
+
 def run_ablation_suite(
     records: Sequence[ClipRecord],
     output_root: Path,
@@ -184,6 +194,7 @@ def run_ablation_suite(
         "strict_features": strict_features,
         "max_clips": max_clips,
         "runs": rows,
+        "best_run": max(rows, key=_sort_key) if rows else None,
     }
 
     with (output_root / "ablation_summary.json").open("w", encoding="utf-8") as summary_file:
