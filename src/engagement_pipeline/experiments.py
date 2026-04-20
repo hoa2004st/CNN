@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Sequence
 
 from engagement_pipeline.data_index import ClipRecord
 from engagement_pipeline.training import TrainingConfig, train_classifier_from_feature_cache
+from engagement_pipeline.visualization import write_ablation_visualizations
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,8 @@ def run_ablation_suite(
         "runs": rows,
         "best_run": max(rows, key=_sort_key) if rows else None,
     }
+
+    summary["visualizations"] = write_ablation_visualizations(summary=summary, output_root=output_root)
 
     with (output_root / "ablation_summary.json").open("w", encoding="utf-8") as summary_file:
         json.dump(summary, summary_file, indent=2, ensure_ascii=True)

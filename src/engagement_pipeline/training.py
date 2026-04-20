@@ -20,6 +20,7 @@ from sklearn.svm import LinearSVC
 
 from engagement_pipeline.data_index import ClipRecord
 from engagement_pipeline.openface import write_manifest_jsonl
+from engagement_pipeline.visualization import write_training_visualizations
 
 POOLING_MODES = ("mean", "max", "mean_std")
 REDUCTION_METHODS = ("none", "pca", "svd")
@@ -483,6 +484,7 @@ def train_classifier_from_feature_cache(
         "feature_cache_root": str(feature_cache_root),
         "model_path": str(model_path),
         "strict_features": strict_features,
+        "labels": labels,
         "config": normalized_config.to_dict(),
         "feature_load": load_summary,
         "label_distribution": {
@@ -499,6 +501,10 @@ def train_classifier_from_feature_cache(
     }
 
     write_manifest_jsonl(rows=manifest_rows, output_path=output_dir / "feature_manifest.jsonl")
+    with (output_dir / "train_summary.json").open("w", encoding="utf-8") as summary_file:
+        json.dump(summary, summary_file, indent=2, ensure_ascii=True)
+
+    summary["visualizations"] = write_training_visualizations(summary=summary, output_dir=output_dir)
     with (output_dir / "train_summary.json").open("w", encoding="utf-8") as summary_file:
         json.dump(summary, summary_file, indent=2, ensure_ascii=True)
 

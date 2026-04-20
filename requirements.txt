@@ -1,5 +1,6 @@
 numpy>=1.26
 pandas>=2.2
+matplotlib>=3.8
 opencv-python>=4.9
 scikit-learn>=1.5
 imbalanced-learn>=0.12

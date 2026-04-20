@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from engagement_pipeline.bundle import export_reusable_artifacts
 from engagement_pipeline.cnn import CNNExtractionConfig, extract_cnn_features_for_records
 from engagement_pipeline.data_index import (
     SPLIT_ORDER,
@@ -125,6 +126,19 @@ def main() -> int:
         "--openface-bin",
         default="FeatureExtraction",
         help="OpenFace FeatureExtraction executable path or command name.",
+    )
+    parser.add_argument(
+        "--copy-openface-raw-csv",
+        action="store_true",
+        help="Keep raw OpenFace CSV files in cache directories. Disabled by default to save space.",
+    )
+    parser.add_argument(
+        "--export-reusable-dir",
+        default="",
+        help=(
+            "Optional directory where only reusable artifacts are copied: "
+            "feature caches, model weights, summaries, tables, and plots."
+        ),
     )
     parser.add_argument(
         "--skip-openface",
@@ -273,6 +287,7 @@ def main() -> int:
         openface_config = OpenFaceExtractionConfig(
             executable=args.openface_bin,
             feature_flags=DEFAULT_FEATURE_FLAGS,
+            copy_raw_csv=args.copy_openface_raw_csv,
         )
         manifest_rows, summary = extract_openface_features_for_records(
             records=records,
@@ -400,6 +415,15 @@ def main() -> int:
             strict_features=not args.allow_missing_features,
         )
         run_summary["steps"]["ablations"] = summary
+        _write_run_summary(run_summary, output_root)
+
+    if args.export_reusable_dir:
+        export_root = export_reusable_artifacts(
+            output_root=output_root,
+            feature_root=feature_root,
+            export_root=resolve_user_path(args.export_reusable_dir),
+        )
+        run_summary["reusable_artifacts_root"] = str(export_root)
         _write_run_summary(run_summary, output_root)
 
     _write_run_summary(run_summary, output_root)

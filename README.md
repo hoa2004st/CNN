@@ -24,6 +24,7 @@ This repository now contains an end-to-end executable implementation for the cor
 - `src/engagement_pipeline/experiments.py`: default ablation suite runner
 - `src/engagement_pipeline/cli.py`: command-line interface
 - `scripts/run_paper_pipeline.py`: orchestrate the full paper pipeline into one output root
+- `outputs/.../visualizations/`: generated PNG plots for training and ablation results
 - `outputs/`: durable generated outputs (not ignored by git)
 - `artifacts/`: scratch/generated outputs from older runs or ad hoc local experiments (ignored by git)
 
@@ -139,6 +140,7 @@ Outputs:
 - `outputs/training/model_bundle.joblib`: persisted scaler/reducer/classifier bundle
 - `outputs/training/feature_manifest.jsonl`: feature-loading result for each clip
 - `outputs/training/train_summary.json`: split metrics, confusion matrices, label distributions, transform settings, and SMOTE report
+- `outputs/training/visualizations/`: metric bars, class distribution, and confusion matrices
 
 ## Run Default Ablation Suite
 
@@ -160,6 +162,7 @@ Outputs:
 - `outputs/experiments/ablation_results.csv`: compact table for quick comparison
 - `outputs/experiments/ablation_summary.json`: full run metadata, status, and best-run selection
 - `outputs/experiments/<run_name>/`: per-run training artifacts
+- `outputs/experiments/visualizations/`: ablation comparison plots
 
 ## Run The Full Paper Pipeline
 
@@ -174,6 +177,8 @@ Useful options:
 - `--skip-openface|--skip-cnn|--skip-fusion|--skip-training|--skip-ablations`: resume from existing caches
 - `--split train --max-clips-per-split 1000`: shard long jobs for rented servers
 - `--feature-root "outputs\shared_features"`: place all extracted OpenFace/CNN/fused features in one explicit folder
+- `--export-reusable-dir "outputs\paper_bundle"`: copy only reusable artifacts for download or later reuse
+- `--copy-openface-raw-csv`: keep raw OpenFace CSV dumps; by default only compressed features and metadata are kept
 - `--overwrite`: force regeneration instead of reusing cache
 
 Primary outputs:
@@ -183,6 +188,7 @@ Primary outputs:
 - `outputs/paper_run/features/openface_cache/`, `cnn_cache/`, `fused_cache/`: feature caches by default
 - `outputs/paper_run/training/`: main fused training run
 - `outputs/paper_run/experiments/`: ablation suite
+- `outputs/paper_run/training/visualizations/` and `outputs/paper_run/experiments/visualizations/`: generated result plots
 
 ## Rented Server Next Steps
 
