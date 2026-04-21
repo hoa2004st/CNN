@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -35,6 +36,9 @@ class OpenFaceExtractionConfig:
     success_only: bool = True
     copy_raw_csv: bool = True
     timeout_sec: int = 900
+    openblas_num_threads: int | None = 8
+    omp_num_threads: int | None = 8
+    opencv_log_level: str = "ERROR"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -45,6 +49,19 @@ class OpenFaceExtractionConfig:
             "success_only": self.success_only,
             "copy_raw_csv": self.copy_raw_csv,
             "timeout_sec": self.timeout_sec,
+            "openblas_num_threads": self.openblas_num_threads,
+            "omp_num_threads": self.omp_num_threads,
+            "opencv_log_level": self.opencv_log_level,
+        }
+
+    def to_cache_dict(self) -> Dict[str, Any]:
+        return {
+            "executable": self.executable,
+            "feature_flags": list(self.feature_flags),
+            "extra_args": list(self.extra_args),
+            "include_metadata_columns": self.include_metadata_columns,
+            "success_only": self.success_only,
+            "copy_raw_csv": self.copy_raw_csv,
         }
 
 
@@ -85,7 +102,7 @@ def _build_cache_key(record: ClipRecord, config: OpenFaceExtractionConfig) -> st
         "clip_mtime_ns": int(stat.st_mtime_ns),
         "split": record.split,
         "clip_id": record.clip_id,
-        "config": config.to_dict(),
+        "config": config.to_cache_dict(),
     }
     return _stable_hash(payload)
 
@@ -121,6 +138,17 @@ def _find_output_csv(output_dir: Path, clip_stem: str) -> Path:
             f"OpenFace did not produce a CSV file in output directory: {output_dir}"
         )
     return candidates[0]
+
+
+def _build_openface_env(config: OpenFaceExtractionConfig) -> Dict[str, str]:
+    env = os.environ.copy()
+    if config.openblas_num_threads is not None:
+        env["OPENBLAS_NUM_THREADS"] = str(config.openblas_num_threads)
+    if config.omp_num_threads is not None:
+        env["OMP_NUM_THREADS"] = str(config.omp_num_threads)
+    if config.opencv_log_level:
+        env["OPENCV_LOG_LEVEL"] = str(config.opencv_log_level)
+    return env
 
 
 def _load_openface_features(
@@ -223,6 +251,7 @@ def extract_or_load_openface_features(
             capture_output=True,
             text=True,
             timeout=config.timeout_sec,
+            env=_build_openface_env(config),
         )
         if completed.returncode != 0:
             details = (completed.stderr or "").strip() or (completed.stdout or "").strip()

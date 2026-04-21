@@ -133,6 +133,18 @@ def main() -> int:
         help="Keep raw OpenFace CSV files in cache directories. Disabled by default to save space.",
     )
     parser.add_argument(
+        "--openface-openblas-num-threads",
+        type=int,
+        default=8,
+        help="OPENBLAS_NUM_THREADS value for OpenFace subprocesses (0 disables override).",
+    )
+    parser.add_argument(
+        "--openface-omp-num-threads",
+        type=int,
+        default=8,
+        help="OMP_NUM_THREADS value for OpenFace subprocesses (0 disables override).",
+    )
+    parser.add_argument(
         "--export-reusable-dir",
         default="",
         help=(
@@ -288,6 +300,16 @@ def main() -> int:
             executable=args.openface_bin,
             feature_flags=DEFAULT_FEATURE_FLAGS,
             copy_raw_csv=args.copy_openface_raw_csv,
+            openblas_num_threads=(
+                args.openface_openblas_num_threads
+                if args.openface_openblas_num_threads > 0
+                else None
+            ),
+            omp_num_threads=(
+                args.openface_omp_num_threads
+                if args.openface_omp_num_threads > 0
+                else None
+            ),
         )
         manifest_rows, summary = extract_openface_features_for_records(
             records=records,

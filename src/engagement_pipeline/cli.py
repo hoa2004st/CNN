@@ -136,6 +136,8 @@ def _extract_openface_command(args: argparse.Namespace) -> int:
         success_only=not args.disable_success_filter,
         copy_raw_csv=not args.skip_raw_csv_copy,
         timeout_sec=args.timeout_sec,
+        openblas_num_threads=args.openblas_num_threads if args.openblas_num_threads > 0 else None,
+        omp_num_threads=args.omp_num_threads if args.omp_num_threads > 0 else None,
     )
 
     manifest_rows, summary = extract_openface_features_for_records(
@@ -484,6 +486,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=900,
         help="Per-clip OpenFace process timeout in seconds.",
+    )
+    extract_parser.add_argument(
+        "--openblas-num-threads",
+        type=int,
+        default=8,
+        help="OPENBLAS_NUM_THREADS value for the OpenFace subprocess (0 disables override).",
+    )
+    extract_parser.add_argument(
+        "--omp-num-threads",
+        type=int,
+        default=8,
+        help="OMP_NUM_THREADS value for the OpenFace subprocess (0 disables override).",
     )
     add_record_selection_arguments(extract_parser)
     extract_parser.add_argument(
